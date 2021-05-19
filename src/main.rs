@@ -1,10 +1,10 @@
 use nom::{
     branch::alt,
-    bytes::complete::is_not,
+    bytes::complete::{is_not, tag, take_while},
     character::complete::{char, line_ending, space0},
     combinator::{map, not, opt},
     error::{Error, ErrorKind},
-    multi::{fold_many0, many0, separated_list0},
+    multi::{fold_many0, many0, many1, separated_list0},
     sequence::{delimited, pair, tuple},
     tuple, IResult,
 };
@@ -16,12 +16,13 @@ struct TypingTarget {
 
 static HIRAGANA: &str = "あいぅうえおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもやゆよらりるれろわゐゑをんーっ";
 static KATAKANA: &str = "アイウエォオカガキギクグケゲコゴサザシジスズセゼソゾタダチヂツヅテデトドナニヌネノハバパヒビピフブプヘベペホボポマミムメモヤユヨラリルレロワヰヱヲンー";
-static YOUON: &str = "ァィゥェォャュョぁぃぅぇぉゃゅょ";
-static HATSUON: &str = "っッ";
+static SUTEGANA: &str = "ァィゥェォャュョぁぃぅぇぉゃゅょ";
+static SOKUON: &str = "っッ";
 static KANA: &str = "あいぅうえおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもやゆよらりるれろわゐゑをんーアイウエォオカガキギクグケゲコゴサザシジスズセゼソゾタダチヂツヅテデトドナニヌネノハバパヒビピフブプヘベペホボポマミムメモヤユヨラリルレロワヰヱヲンーァィゥェォャュョぁぃぅぇぉゃゅょっッ";
 
 fn kana_to_typed_chunks(c: char) -> Option<Vec<String>> {
     match c {
+        // hiragana
         'あ' => Some(vec!["a".to_owned()]),
         'い' => Some(vec!["i".to_owned()]),
         'う' => Some(vec!["u".to_owned()]),
@@ -94,36 +95,62 @@ fn kana_to_typed_chunks(c: char) -> Option<Vec<String>> {
         'ゑ' => Some(vec!["we".to_owned()]),
         'を' => Some(vec!["wo".to_owned()]),
         'ん' => Some(vec!["n".to_owned(), "nn".to_owned()]),
+        // katakana
         _ => None,
     }
 }
 
-fn not_kana(i: &str) -> nom::IResult<&str, char> {
-    nom::character::complete::none_of(KANA)(i)
+fn is_not_kana_or_open_paren(c: char) -> bool {
+    c != '(' && !KANA.contains(c)
 }
 
 fn is_hiragana(i: &str) -> nom::IResult<&str, char> {
     nom::character::complete::one_of(HIRAGANA)(i)
 }
 
-fn is_youon(i: &str) -> nom::IResult<&str, char> {
-    nom::character::complete::one_of(YOUON)(i)
+fn is_sutegana(i: &str) -> nom::IResult<&str, char> {
+    nom::character::complete::one_of(SUTEGANA)(i)
 }
 
-fn is_hatsuon(i: &str) -> nom::IResult<&str, char> {
-    nom::character::complete::one_of(HATSUON)(i)
+fn is_sokuon(i: &str) -> nom::IResult<&str, char> {
+    nom::character::complete::one_of(SOKUON)(i)
+}
+
+fn parenthesized(i: &str) -> nom::IResult<&str, TypingTarget> {
+    map(
+        many1(pair(
+            take_while(is_not_kana_or_open_paren),
+            delimited(tag("("), take_while(|c| c != ')'), tag(")")),
+        )),
+        |things: Vec<(&str, &str)>| {
+            let mut typed_chunks = vec![];
+            let mut displayed_chunks = vec![];
+            for (displayed, typed) in things {
+                typed_chunks.push(vec![typed.into()]);
+                displayed_chunks.push(displayed.into());
+            }
+            TypingTarget {
+                typed_chunks,
+                displayed_chunks,
+            }
+        },
+    )(i)
+}
+
+fn japanese(i: &str) -> nom::IResult<&str, Vec<TypingTarget>> {
+    many0(alt((kana_chunk, parenthesized)))(i)
 }
 
 fn kana_chunk(i: &str) -> nom::IResult<&str, TypingTarget> {
     map(
-        many0(tuple((opt(is_hatsuon), is_hiragana, opt(is_youon)))),
+        many1(tuple((opt(is_sokuon), is_hiragana, opt(is_sutegana)))),
         |things| {
             let mut typed_chunks = vec![];
             let mut displayed_chunks = vec![];
 
-            for (hatsuon, kana, _youon) in things {
+            for (sokuon, kana, _sutegana) in things {
                 if let Some(typed) = kana_to_typed_chunks(kana) {
-                    if let Some(hatsuon) = hatsuon {
+                    if let Some(sokuon) = sokuon {
                         // TODO potentially, the first character of a second/third/other
                         // typed chunk could be different.
 
@@ -134,7 +161,7 @@ fn kana_chunk(i: &str) -> nom::IResult<&str, TypingTarget> {
                             .next()
                             .unwrap()
                             .into()]);
-                        displayed_chunks.push(hatsuon.into());
+                        displayed_chunks.push(sokuon.into());
                     }
                     typed_chunks.push(typed);
                     displayed_chunks.push(kana.into());
@@ -151,7 +178,14 @@ fn kana_chunk(i: &str) -> nom::IResult<&str, TypingTarget> {
 
 fn main() {
     println!("Hello, world!");
+    println!("{:?}", parenthesized("test(what)who(bleh)"));
+    println!("{:?}", parenthesized("小(chii)さい"));
     println!("{:?}", kana_chunk("はじめましてとっとりです"));
+    println!("--- japanese");
+    println!("{:?}", japanese("test"));
+    println!("{:?}", japanese("test(what)who(bleh)"));
+    println!("{:?}", japanese("小さい"));
+    println!("{:?}", japanese("小(chii)さい"));
 }
 
 #[cfg(test)]
