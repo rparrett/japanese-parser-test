@@ -1,24 +1,20 @@
 use nom::{
     branch::alt,
-    bytes::complete::{is_not, tag, take_while},
-    character::complete::{char, line_ending, space0},
-    combinator::{map, not, opt},
-    error::{Error, ErrorKind},
-    multi::{fold_many0, many0, many1, separated_list0},
+    bytes::complete::{tag, take_while},
+    combinator::{map, opt},
+    multi::{fold_many0, many1},
     sequence::{delimited, pair, tuple},
-    tuple, IResult,
 };
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct TypingTarget {
     displayed_chunks: Vec<String>,
     typed_chunks: Vec<Vec<String>>,
 }
 
-static HIRAGANA: &str = "あいぅうえおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもやゆよらりるれろわゐゑをんーっ";
-static KATAKANA: &str = "アイウエォオカガキギクグケゲコゴサザシジスズセゼソゾタダチヂツヅテデトドナニヌネノハバパヒビピフブプヘベペホボポマミムメモヤユヨラリルレロワヰヱヲンー";
+static HIRAGANA: &str = "あいうえおかがきぎくぐけげこごさざしじすずせぜそぞただちぢつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもやゆよらりるれろわゐゑをんー";
+static KATAKANA: &str = "アイウエオカガキギクグケゲコゴサザシジスズセゼソゾタダチヂツヅテデトドナニヌネノハバパヒビピフブプヘベペホボポマミムメモヤユヨラリルレロワヰヱヲンー";
 static SUTEGANA: &str = "ァィゥェォャュョぁぃぅぇぉゃゅょ";
 static SOKUON: &str = "っッ";
-static KANA: &str = "あいぅうえおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもやゆよらりるれろわゐゑをんーアイウエォオカガキギクグケゲコゴサザシジスズセゼソゾタダチヂツヅテデトドナニヌネノハバパヒビピフブプヘベペホボポマミムメモヤユヨラリルレロワヰヱヲンーァィゥェォャュョぁぃぅぇぉゃゅょっッ";
 
 fn kana_to_typed_chunks(kana: &str) -> Option<Vec<String>> {
     match kana {
@@ -135,7 +131,11 @@ fn kana_to_typed_chunks(kana: &str) -> Option<Vec<String>> {
 }
 
 fn is_not_kana_or_open_paren(c: char) -> bool {
-    c != '(' && !KANA.contains(c)
+    c != '('
+        && !HIRAGANA.contains(c)
+        && !KATAKANA.contains(c)
+        && !SUTEGANA.contains(c)
+        && !SOKUON.contains(c)
 }
 
 fn is_hiragana(i: &str) -> nom::IResult<&str, char> {
@@ -171,8 +171,19 @@ fn parenthesized(i: &str) -> nom::IResult<&str, TypingTarget> {
     )(i)
 }
 
-fn japanese(i: &str) -> nom::IResult<&str, Vec<TypingTarget>> {
-    many0(alt((kana_chunk, parenthesized)))(i)
+fn japanese(i: &str) -> nom::IResult<&str, TypingTarget> {
+    fold_many0(
+        alt((kana_chunk, parenthesized)),
+        TypingTarget {
+            typed_chunks: vec![],
+            displayed_chunks: vec![],
+        },
+        |mut acc, thing| {
+            acc.typed_chunks.extend(thing.typed_chunks);
+            acc.displayed_chunks.extend(thing.displayed_chunks);
+            acc
+        },
+    )(i)
 }
 
 fn kana_chunk(i: &str) -> nom::IResult<&str, TypingTarget> {
@@ -215,33 +226,5 @@ fn kana_chunk(i: &str) -> nom::IResult<&str, TypingTarget> {
 }
 
 fn main() {
-    println!("Hello, world!");
-    println!("{:?}", parenthesized("test(what)who(bleh)"));
-    println!("{:?}", parenthesized("小(chii)さい"));
-    println!("{:?}", kana_chunk("はじめましてとっとりです"));
-    println!("--- japanese");
-    println!("{:?}", japanese("test"));
-    println!("{:?}", japanese("test(what)who(bleh)"));
-    println!("{:?}", japanese("小さい"));
-    println!("{:?}", japanese("小(chii)さい"));
-    println!("{:?}", japanese("とうきょうととっとり"));
-    println!("{:?}", japanese("京都(kyouto)ととうきょうととっとり"));
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_is_hiragana() {
-        assert_eq!(is_hiragana("あ"), Ok(("", 'あ')));
-        assert_eq!(is_hiragana("はじめまして。"), Ok(("じめまして。", 'は')));
-        assert_eq!(
-            is_hiragana("P"),
-            Err(nom::Err::Error(Error {
-                input: "P",
-                code: ErrorKind::OneOf
-            }))
-        );
-    }
+    println!("{:?}", japanese("京(kyou)都(to)ととうきょうととっとり"));
 }
