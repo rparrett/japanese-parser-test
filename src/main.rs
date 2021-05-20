@@ -226,5 +226,5 @@ fn kana_chunk(i: &str) -> nom::IResult<&str, TypingTarget> {
 }
 
 fn main() {
-    println!("{:?}", japanese("京(kyou)都(to)ととうきょうととっとり"));
+    println!("{:?}", japanese("京(kyou)都(to)とかんだとひろしま"));
 }
